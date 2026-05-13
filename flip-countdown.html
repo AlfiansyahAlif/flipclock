@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flip Countdown</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #1a1a1e;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+}
+
+/* ── Clock row ── */
+.clock {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.group { display: flex; gap: 8px; }
+.sep {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 80px;
+  font-weight: 700;
+  color: #444;
+  line-height: 1;
+  align-self: center;
+  margin-bottom: 10px;
+}
+
+/* ── Digit card ── */
+.digit-card {
+  width: 130px;
+  height: 170px;
+  position: relative;
+  border-radius: 14px;
+  /* perspective for 3D children */
+  perspective: 600px;
+  perspective-origin: 50% 50%;
+}
+
+/*
+  Layout:
+  [static-top]   — always shows CURRENT value, top half
+  [static-bot]   — always shows CURRENT value, bottom half (revealed when flap lands)
+  [flap]         — the moving piece: top half showing OLD, folds down over bottom
+  fold-line
+*/
+
+/* Static top half — bg slightly lighter */
+.s-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  border-radius: 14px 14px 0 0;
+  background: #323236;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Static bottom half — bg slightly darker */
+.s-bot {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 50%;
+  border-radius: 0 0 14px 14px;
+  background: #28282c;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Number rendering: clip top/bottom half of a full-height digit */
+.s-top .n {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 154px;
+  line-height: 1;
+  color: #f0f0ee;
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  top: 0;
+  /* top half shows upper portion of digit */
+}
+.s-bot .n {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 154px;
+  line-height: 1;
+  color: #d8d8d4;
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  bottom: 0;
+}
+
+/* Thin divider line */
+.fold-line {
+  position: absolute;
+  top: 50%; left: 0; right: 0;
+  height: 2px;
+  background: #111;
+  transform: translateY(-50%);
+  z-index: 80;
+  pointer-events: none;
+}
+
+/*
+  THE FLAP — a top-half sized panel that:
+  1. Starts flat (rotateX 0), showing OLD value
+  2. Rotates to -90deg (disappears at mid)
+  Then a BACK flap:
+  1. Starts at +90deg (hidden)
+  2. Rotates to 0 (shows NEW value, bottom half style)
+*/
+
+.flap-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  border-radius: 14px 14px 0 0;
+  background: #323236;
+  overflow: hidden;
+  transform-origin: center bottom;
+  transform-style: preserve-3d;
+  z-index: 30;
+  will-change: transform;
+  /* shadow on bottom edge while mid-flip */
+  box-shadow: none;
+}
+.flap-top .n {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 154px;
+  line-height: 1;
+  color: #f0f0ee;
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  top: 0;
+}
+
+/* Gradient overlay that darkens as flap folds */
+.flap-top .shadow {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.55) 100%);
+  opacity: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.flap-bot {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 50%;
+  border-radius: 0 0 14px 14px;
+  background: #28282c;
+  overflow: hidden;
+  transform-origin: center top;
+  transform-style: preserve-3d;
+  z-index: 29;
+  transform: rotateX(90deg);
+  will-change: transform;
+}
+.flap-bot .n {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 154px;
+  line-height: 1;
+  color: #d8d8d4;
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  bottom: 0;
+}
+
+/* Shadow cast on static-bot while flap descends */
+.flap-bot .shadow {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, transparent 60%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* CSS animations — using JS-driven class toggling with transitions instead
+   so we get smooth requestAnimationFrame control */
+
+/* ── Labels ── */
+.labels {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: -40px;
+}
+.lbl-group { display: flex; gap: 8px; }
+.lbl {
+  width: 130px;
+  text-align: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  color: #555;
+  text-transform: uppercase;
+}
+.lbl-sep { width: 36px; }
+
+/* ── Controls ── */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.input-row { display: flex; align-items: center; gap: 8px; }
+.inp-grp { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.inp-grp label {
+  font-size: 10px; letter-spacing: 0.25em; color: #555;
+  font-family: monospace; text-transform: uppercase;
+}
+.inp-grp input {
+  width: 72px; background: #1c1c20; border: 1px solid #3a3a40;
+  border-radius: 6px; color: #f0f0ee;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 28px; font-weight: 700;
+  text-align: center; padding: 5px 4px; outline: none;
+  -moz-appearance: textfield; transition: border-color 0.15s;
+}
+.inp-grp input::-webkit-outer-spin-button,
+.inp-grp input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.inp-grp input:focus { border-color: #888; }
+.inp-sep {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 30px;
+  font-weight: 700; color: #555; margin-top: 14px;
+}
+.btn-row { display: flex; gap: 8px; }
+button {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700;
+  letter-spacing: 0.12em; padding: 10px 30px; border-radius: 6px;
+  border: 1px solid #3a3a40; background: #1c1c20; color: #c6c6c1;
+  cursor: pointer; text-transform: uppercase; transition: background 0.12s, border-color 0.12s;
+}
+button:hover { background: #28282c; border-color: #666; }
+button:active { transform: scale(0.97); }
+#btn-start { background: #f0f0ee; color: #1c1c20; border-color: #f0f0ee; }
+#btn-start:hover { background: #fff; }
+.done-msg {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 20px; font-weight: 700;
+  letter-spacing: 0.35em; color: #f0f0ee; display: none; text-transform: uppercase;
+  animation: blink 0.8s ease-in-out infinite alternate;
+}
+@keyframes blink { from{opacity:0.3} to{opacity:1} }
+</style>
+</head>
+<body>
+
+<div class="clock">
+  <div class="group">
+    <div class="digit-card" id="dc-h0">
+      <div class="s-top"><div class="n" id="st-h0">0</div></div>
+      <div class="s-bot"><div class="n" id="sb-h0">0</div></div>
+      <div class="flap-top" id="ft-h0"><div class="n" id="ftn-h0">0</div><div class="shadow" id="fts-h0"></div></div>
+      <div class="flap-bot" id="fb-h0"><div class="n" id="fbn-h0">0</div><div class="shadow" id="fbs-h0"></div></div>
+      <div class="fold-line"></div>
+    </div>
+    <div class="digit-card" id="dc-h1">
+      <div class="s-top"><div class="n" id="st-h1">0</div></div>
+      <div class="s-bot"><div class="n" id="sb-h1">0</div></div>
+      <div class="flap-top" id="ft-h1"><div class="n" id="ftn-h1">0</div><div class="shadow" id="fts-h1"></div></div>
+      <div class="flap-bot" id="fb-h1"><div class="n" id="fbn-h1">0</div><div class="shadow" id="fbs-h1"></div></div>
+      <div class="fold-line"></div>
+    </div>
+  </div>
+
+  <div class="sep">:</div>
+
+  <div class="group">
+    <div class="digit-card" id="dc-m0">
+      <div class="s-top"><div class="n" id="st-m0">0</div></div>
+      <div class="s-bot"><div class="n" id="sb-m0">0</div></div>
+      <div class="flap-top" id="ft-m0"><div class="n" id="ftn-m0">0</div><div class="shadow" id="fts-m0"></div></div>
+      <div class="flap-bot" id="fb-m0"><div class="n" id="fbn-m0">0</div><div class="shadow" id="fbs-m0"></div></div>
+      <div class="fold-line"></div>
+    </div>
+    <div class="digit-card" id="dc-m1">
+      <div class="s-top"><div class="n" id="st-m1">5</div></div>
+      <div class="s-bot"><div class="n" id="sb-m1">5</div></div>
+      <div class="flap-top" id="ft-m1"><div class="n" id="ftn-m1">5</div><div class="shadow" id="fts-m1"></div></div>
+      <div class="flap-bot" id="fb-m1"><div class="n" id="fbn-m1">5</div><div class="shadow" id="fbs-m1"></div></div>
+      <div class="fold-line"></div>
+    </div>
+  </div>
+
+  <div class="sep">:</div>
+
+  <div class="group">
+    <div class="digit-card" id="dc-s0">
+      <div class="s-top"><div class="n" id="st-s0">0</div></div>
+      <div class="s-bot"><div class="n" id="sb-s0">0</div></div>
+      <div class="flap-top" id="ft-s0"><div class="n" id="ftn-s0">0</div><div class="shadow" id="fts-s0"></div></div>
+      <div class="flap-bot" id="fb-s0"><div class="n" id="fbn-s0">0</div><div class="shadow" id="fbs-s0"></div></div>
+      <div class="fold-line"></div>
+    </div>
+    <div class="digit-card" id="dc-s1">
+      <div class="s-top"><div class="n" id="st-s1">0</div></div>
+      <div class="s-bot"><div class="n" id="sb-s1">0</div></div>
+      <div class="flap-top" id="ft-s1"><div class="n" id="ftn-s1">0</div><div class="shadow" id="fts-s1"></div></div>
+      <div class="flap-bot" id="fb-s1"><div class="n" id="fbn-s1">0</div><div class="shadow" id="fbs-s1"></div></div>
+      <div class="fold-line"></div>
+    </div>
+  </div>
+</div>
+
+<div class="labels">
+  <div class="lbl-group"><div class="lbl">Jam</div><div class="lbl"></div></div>
+  <div class="lbl-sep"></div>
+  <div class="lbl-group"><div class="lbl">Menit</div><div class="lbl"></div></div>
+  <div class="lbl-sep"></div>
+  <div class="lbl-group"><div class="lbl">Detik</div><div class="lbl"></div></div>
+</div>
+
+<div class="controls">
+  <div class="input-row">
+    <div class="inp-grp"><label>Jam</label><input type="number" id="inp-h" min="0" max="99" value="0"></div>
+    <div class="inp-sep">:</div>
+    <div class="inp-grp"><label>Menit</label><input type="number" id="inp-m" min="0" max="59" value="5"></div>
+    <div class="inp-sep">:</div>
+    <div class="inp-grp"><label>Detik</label><input type="number" id="inp-s" min="0" max="59" value="0"></div>
+  </div>
+  <div class="btn-row">
+    <button id="btn-start" onclick="startClock()">▶ Mulai</button>
+    <button id="btn-pause" onclick="pauseClock()" style="display:none">⏸ Jeda</button>
+    <button onclick="resetClock()">↺ Reset</button>
+  </div>
+  <div class="done-msg" id="done-msg">⏰ Waktu Habis!</div>
+</div>
+
+<script>
+const IDS = ['h0','h1','m0','m1','s0','s1'];
+let prev = { h0:'0', h1:'0', m0:'0', m1:'5', s0:'0', s1:'0' };
+let totalSec = 0, running = false, iv = null;
+let busy = {};
+
+const DURATION = 380; // ms total flip
+
+function $(id) { return document.getElementById(id); }
+
+function setStatic(id, ch) {
+  $(`st-${id}`).textContent  = ch;
+  $(`sb-${id}`).textContent  = ch;
+  $(`ftn-${id}`).textContent = ch;
+  $(`fbn-${id}`).textContent = ch;
+}
+
+/*
+  Smooth flip using rAF + manual transform interpolation.
+  Phase 1 (0 → DURATION/2): flap-top rotates 0 → -90deg (fold away)
+                              shadow on flap-top goes 0 → 1
+  Phase 2 (DURATION/2 → DURATION): flap-bot rotates 90 → 0deg (unfold)
+                              shadow on flap-bot goes 1 → 0
+*/
+function flip(id, oldCh, newCh) {
+  if (oldCh === newCh || busy[id]) return;
+  busy[id] = true;
+
+  const ftEl  = $(`ft-${id}`);
+  const fbEl  = $(`fb-${id}`);
+  const ftsEl = $(`fts-${id}`);
+  const fbsEl = $(`fbs-${id}`);
+
+  // Set content
+  $(`ftn-${id}`).textContent = oldCh;  // top flap shows OLD
+  $(`fbn-${id}`).textContent = newCh;  // bot flap shows NEW
+
+  // Static bot already updated to new for when flap lands
+  $(`sb-${id}`).textContent = newCh;
+
+  // Reset transforms instantly
+  ftEl.style.transition = 'none';
+  fbEl.style.transition = 'none';
+  ftEl.style.transform = 'rotateX(0deg)';
+  fbEl.style.transform = 'rotateX(90deg)';
+  ftsEl.style.opacity = '0';
+  fbsEl.style.opacity = '0';
+
+  const half = DURATION / 2;
+  let start = null;
+  let phase2started = false;
+
+  function ease(t) {
+    // smooth ease in-out (sine)
+    return -(Math.cos(Math.PI * t) - 1) / 2;
+  }
+
+  function frame(ts) {
+    if (!start) start = ts;
+    const elapsed = ts - start;
+    const t = Math.min(elapsed / DURATION, 1);
+
+    if (t < 0.5) {
+      // Phase 1: fold top flap away (0 → -90deg)
+      const p = ease(t * 2);           // 0→1 over first half
+      const angle = p * -90;
+      ftEl.style.transform = `rotateX(${angle}deg)`;
+      ftsEl.style.opacity = String(p * 0.7);
+    } else {
+      // Update static top at midpoint once
+      if (!phase2started) {
+        phase2started = true;
+        $(`st-${id}`).textContent = newCh;
+        $(`ftn-${id}`).textContent = newCh;
+        ftEl.style.transform = 'rotateX(-90deg)';
+        ftsEl.style.opacity = '0';
+      }
+      // Phase 2: unfold bottom flap (90 → 0deg)
+      const p = ease((t - 0.5) * 2);  // 0→1 over second half
+      const angle = 90 - p * 90;
+      fbEl.style.transform = `rotateX(${angle}deg)`;
+      fbsEl.style.opacity = String((1 - p) * 0.5);
+    }
+
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      // Done: reset everything
+      ftEl.style.transform = 'rotateX(0deg)';
+      fbEl.style.transform = 'rotateX(90deg)';
+      ftsEl.style.opacity = '0';
+      fbsEl.style.opacity = '0';
+      $(`ftn-${id}`).textContent = newCh;
+      $(`fbn-${id}`).textContent = newCh;
+      busy[id] = false;
+    }
+  }
+
+  requestAnimationFrame(frame);
+}
+
+function decompose(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return {
+    h0: String(Math.floor(h/10)), h1: String(h%10),
+    m0: String(Math.floor(m/10)), m1: String(m%10),
+    s0: String(Math.floor(s/10)), s1: String(s%10),
+  };
+}
+
+function renderInit() {
+  const h = +($('inp-h').value)||0;
+  const m = +($('inp-m').value)||0;
+  const s = +($('inp-s').value)||0;
+  const v = decompose(h*3600+m*60+s);
+  IDS.forEach(id => { setStatic(id, v[id]); prev[id] = v[id]; });
+}
+
+function renderTick(sec) {
+  const v = decompose(sec);
+  IDS.forEach(id => {
+    if (v[id] !== prev[id]) { flip(id, prev[id], v[id]); prev[id] = v[id]; }
+  });
+}
+
+function startClock() {
+  if (running) return;
+  if (!totalSec) {
+    const h = +($('inp-h').value)||0;
+    const m = +($('inp-m').value)||0;
+    const s = +($('inp-s').value)||0;
+    totalSec = h*3600 + m*60 + s;
+    if (!totalSec) return;
+  }
+  $('done-msg').style.display = 'none';
+  $('btn-start').style.display = 'none';
+  $('btn-pause').style.display = 'inline-block';
+  running = true;
+  iv = setInterval(() => {
+    if (totalSec <= 0) {
+      clearInterval(iv); running = false;
+      renderTick(0);
+      $('done-msg').style.display = 'block';
+      $('btn-start').style.display = 'inline-block';
+      $('btn-pause').style.display = 'none';
+      return;
+    }
+    totalSec--;
+    renderTick(totalSec);
+  }, 1000);
+}
+
+function pauseClock() {
+  clearInterval(iv); running = false;
+  $('btn-start').style.display = 'inline-block';
+  $('btn-pause').style.display = 'none';
+}
+
+function resetClock() {
+  clearInterval(iv); running = false; totalSec = 0; busy = {};
+  $('btn-start').style.display = 'inline-block';
+  $('btn-pause').style.display = 'none';
+  $('done-msg').style.display = 'none';
+  renderInit();
+}
+
+renderInit();
+</script>
+</body>
+</html>
